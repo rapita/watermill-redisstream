@@ -119,6 +119,10 @@ type SubscriberConfig struct {
 	// should return the read method and close the subscriber or just log the error
 	// and continue.
 	ShouldStopOnReadErrors func(error) bool
+
+	// Delete messages from the stream after acknowledgment.
+	// This is helpfully when you want to avoid stream growth and contains many already processed messages.
+	DeleteAfterAck bool
 }
 
 func (sc *SubscriberConfig) setDefaults() {
@@ -503,6 +507,7 @@ func (s *Subscriber) createMessageHandler(output chan *message.Message) messageH
 		consumerGroup:   s.config.ConsumerGroup,
 		unmarshaller:    s.config.Unmarshaller,
 		nackResendSleep: s.config.NackResendSleep,
+		deleteAfterAck:  s.config.DeleteAfterAck,
 		logger:          s.logger,
 		closing:         s.closing,
 	}
@@ -536,6 +541,7 @@ type messageHandler struct {
 	unmarshaller  Unmarshaller
 
 	nackResendSleep time.Duration
+	deleteAfterAck  bool
 
 	logger  watermill.LoggerAdapter
 	closing chan struct{}
@@ -582,6 +588,11 @@ ResendLoop:
 				// deadly retry ack
 				err := retry.Retry(func(attempt uint) error {
 					err := h.rc.XAck(ctx, stream, h.consumerGroup, xm.ID).Err()
+					if err == nil && h.deleteAfterAck {
+						if _, delErr := h.rc.XDel(ctx, stream, xm.ID).Result(); delErr != nil {
+							h.logger.Error("Message delete fail", err, receivedMsgLogFields)
+						}
+					}
 					return err
 				}, func(attempt uint) bool {
 					if attempt != 0 {
