@@ -588,11 +588,6 @@ ResendLoop:
 				// deadly retry ack
 				err := retry.Retry(func(attempt uint) error {
 					err := h.rc.XAck(ctx, stream, h.consumerGroup, xm.ID).Err()
-					if err == nil && h.deleteAfterAck {
-						if _, delErr := h.rc.XDel(ctx, stream, xm.ID).Result(); delErr != nil {
-							h.logger.Error("Message delete fail", err, receivedMsgLogFields)
-						}
-					}
 					return err
 				}, func(attempt uint) bool {
 					if attempt != 0 {
@@ -613,6 +608,11 @@ ResendLoop:
 				}
 			}
 			h.logger.Trace("Message Acked", receivedMsgLogFields)
+			if h.deleteAfterAck {
+				if _, delErr := h.rc.XDel(ctx, stream, xm.ID).Result(); delErr != nil {
+					h.logger.Error("Message delete fail", err, receivedMsgLogFields)
+				}
+			}
 			break ResendLoop
 		case <-msg.Nacked():
 			h.logger.Trace("Message Nacked", receivedMsgLogFields)
